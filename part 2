@@ -1,0 +1,117 @@
+var SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1zSMcS_4c";
+var url_sheet_name = "url_list";
+var source_name = "Prices";
+var campaign_name = "fill Campaign name";
+var adgroup_names = ["adgroup1","adgroup2"];
+
+function main() {
+	
+  var ad_group_url_dict = get_adgroup_url_dict()
+  var urls_and_prices = get_urls_and_prices();
+  var source = create_or_get_source();
+  var customizersById = getCustomizersById(source); 
+  for(j=0 ;j<adgroup_names.length; j++){
+    var adgroup_name = adgroup_names[j];
+    create_dynamic_ad_if_none(adgroup_name);
+    setCustomizerValues(source, urls_and_prices, customizersById,adgroup_name,ad_group_url_dict);
+  }
+}
+
+function get_urls_and_prices(){
+    var ss = SPREADSHEET_URL;
+    var urls_and_prices = {}; 
+    var sheet = SpreadsheetApp.openByUrl(ss).getSheetByName(url_sheet_name);
+    var urls_array = sheet.getRange(2,2,sheet.getMaxRows() - 1,2).getValues();
+    for (var i = 0; i < urls_array.length; i++) {
+      if(urls_array[i][0]){urls_and_prices[urls_array[i][0]] = urls_array[i][1];}
+     };
+    return urls_and_prices;
+}
+
+function create_or_get_source() {
+  var sources = AdsApp.adCustomizerSources().get();
+  while (sources.hasNext()) {
+    var source = sources.next();
+    if (source.getName() == source_name) {
+      return source;
+    }
+  }
+  return AdsApp.newAdCustomizerSourceBuilder()
+      .withName(source_name)
+      .addAttribute('url', 'text')
+      .addAttribute('price', 'price')
+      .addAttribute('Custom ID', 'text')
+      .build()
+      .getResult();
+}
+
+function create_dynamic_ad_if_none(adgroup_name) {
+  var adGroupIterator = AdsApp.adGroups()
+    .withCondition('Name = "' + adgroup_name + '"')
+    .withCondition('CampaignName = "' + campaign_name + '"')
+    .get()
+  if(adGroupIterator.hasNext()) {
+    adgroup = adGroupIterator.next();
+    var adsIterator = adgroup.ads().withCondition("LabelNames CONTAINS_ALL ['Dynamic']").get();
+    while (adsIterator.hasNext()) {
+      return;
+    }
+  }
+    
+  adgroup.newAd().expandedTextAdBuilder()
+    .withHeadlinePart1('FILL HEADLINE 1')
+    .withHeadlinePart2('Buy Now, Only {=Prices.price}')
+    .withDescription('FILL DESCRIPTION1')
+    .withPath1('PATH1')
+    .withPath2('PATH2')
+    .withFinalUrl('https://www.example.com/')
+    .build()
+    .getResult()
+    .applyLabel("Dynamic");
+
+}
+
+function getCustomizersById(source) {
+  var customizers = source.items().get();
+  var customizersById = {};
+  while (customizers.hasNext()) {
+    var customizer = customizers.next();
+    customizersById[customizer.getAttributeValue('Custom ID')] = customizer;
+  }
+  return customizersById;
+}
+
+function get_adgroup_url_dict(){
+  var adgroup_url_dict = {};
+  for(x=0 ;x<adgroup_names.length; x++){
+    var adGroupIterator = AdsApp.adGroups()
+      .withCondition('Name = "' + adgroup_names[x] + '"')
+      .withCondition('CampaignName = "' + campaign_name + '"')
+      .get()
+    if(adGroupIterator.hasNext()) {
+      adgroup = adGroupIterator.next();
+      var adsIterator = adgroup.ads().get();
+      if (adsIterator.hasNext()) {
+        var thead = adsIterator.next()
+        adgroup_url_dict[adgroup_names[x]] = thead.urls().getFinalUrl();
+      }
+    }
+  }
+  return adgroup_url_dict;
+}
+
+function setCustomizerValues(source, urls_and_prices, customizersById,adgroup_name,ad_group_url_dict) {
+  var url = ad_group_url_dict[adgroup_name];
+  var price = urls_and_prices[url];
+  var custom_id = adgroup_name + "_" + url.toLowerCase()
+  var customizer = customizersById[custom_id];
+  if (customizer) {
+    customizer.setAttributeValue('price', '$'+price);
+  } else {
+    source.adCustomizerItemBuilder()
+      .withAttributeValue('Custom ID', custom_id)
+      .withAttributeValues({url: url,price:'$'+price})
+      .withTargetAdGroup(campaign_name, adgroup_name)
+      .build();
+  }
+}
